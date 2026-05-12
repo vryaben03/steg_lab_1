@@ -1,0 +1,10 @@
+env/
+__pycache__/
+.env
+*.log
+
+test_message_*
+temp_*
+medical_512
+texture_512
+stego_images
