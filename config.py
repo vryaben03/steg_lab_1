@@ -30,3 +30,10 @@ BIT_PLANES_PATH = "bit_planes"
 STEGO_IMAGES_PATH = "stego_images"
 HISTOGRAMS_PATH= "histograms"
 METRICS_PATH = "metrics"
+
+
+# ========== Для водяных знаков ==========
+# Параметры внедрения ЦВЗ
+WATERMARK_BLOCK_SIZE = 16  # размер блока для адаптивного метода
+WATERMARK_KEY = 42  # секретный ключ для LSB-метода
+WATERMARK_MAX_IMAGES = 30  # количество изображений для исследовательской части

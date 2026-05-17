@@ -19,3 +19,5 @@ temp_*
 medical_512
 texture_512
 stego_images
+
+watermarking_adaptive/
