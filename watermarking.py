@@ -10,8 +10,8 @@ from PIL import Image
 from dotenv import load_dotenv
 import os
 import random
-from lsb_steganography import LSBSteganography
 from stego_utils import compute_metrics
+from config import RESULTS_PATH, WATERMARKING_PATH
 
 load_dotenv()
 
@@ -59,7 +59,7 @@ class DigitalWatermark:
     
     def logo_to_bits(self):
         """Преобразует логотип в битовую строку (1 бит на пиксель)"""
-        # Преобразуем в бинарное: >127 = 1, <=127 = 0
+        # преобразуем в бинарное: >127 = 1, <=127 = 0
         binary_logo = (self.logo > 127).astype(np.uint8)
         bits = binary_logo.flatten().tolist()
         print(f"Логотип преобразован в {len(bits)} бит")
@@ -72,7 +72,7 @@ class DigitalWatermark:
     
     def get_pixel_order(self, key, total_pixels):
         """
-        Генерирует перемешанный порядок пикселей на основе секретного ключа
+        генерирует перемешанный порядок пикселей на основе секретного ключа
         """
         random.seed(key)
         indices = list(range(total_pixels))
@@ -81,7 +81,7 @@ class DigitalWatermark:
     
     def embed_lsb(self, output_path, key=42):
         """
-        Режим 1: Внедрение в LSB с секретным ключом
+        Внедрение в LSB с секретным ключом
         
         Args:
             output_path: путь для сохранения стего-изображения
@@ -100,12 +100,12 @@ class DigitalWatermark:
         if self.logo is None:
             raise ValueError("Логотип не загружен")
         
-        # Преобразуем логотип в биты
+        # преобразуем логотип в биты
         logo_bits = self.logo_to_bits()
         total_bits = self.height * self.width
         max_bits_to_embed = total_bits // 2  # не менее половины ёмкости
         
-        # Если логотип меньше половины ёмкости, дублируем его
+        # если логотип меньше половины ёмкости, дублируем его
         required_bits = max_bits_to_embed
         if len(logo_bits) < required_bits:
             repeats = (required_bits // len(logo_bits)) + 1
@@ -114,10 +114,10 @@ class DigitalWatermark:
         
         print(f"Внедряется {len(logo_bits)} бит (половина ёмкости: {max_bits_to_embed})")
         
-        # Создаём перемешанный порядок пикселей
+        # создаём перемешанный порядок пикселей
         pixel_order = self.get_pixel_order(key, total_bits)
         
-        # Внедряем биты в LSB (используем int32 для избежания переполнения)
+        # внедряем биты в LSB
         stego_image = self.image.copy().astype(np.int32)
         bit_pos = 0  # LSB
         
@@ -127,16 +127,16 @@ class DigitalWatermark:
             pixel_idx = pixel_order[idx]
             i = pixel_idx // self.width
             j = pixel_idx % self.width
-            # Заменяем LSB (работаем с int32)
+            # заменяем LSB
             stego_image[i, j] = (stego_image[i, j] & ~1) | bit
         
-        # Приводим обратно к uint8
+        # приводим обратно к uint8
         stego_image = np.clip(stego_image, 0, 255).astype(np.uint8)
         
-        # Сохраняем
+        # сохраняем
         self.save_image(stego_image, output_path)
         
-        # Считаем метрики
+        # считаем метрики
         metrics = compute_metrics(self.image_path, output_path)
         metrics['method'] = 'LSB'
         metrics['key'] = key
@@ -146,7 +146,7 @@ class DigitalWatermark:
     
     def embed_adaptive(self, output_path, block_size=16):
         """
-        Режим 2: Адаптивное внедрение по локальной дисперсии
+        Адаптивное внедрение по локальной дисперсии
         
         Args:
             output_path: путь для сохранения стего-изображения
@@ -165,7 +165,7 @@ class DigitalWatermark:
         if self.logo is None:
             raise ValueError("Логотип не загружен")
         
-        # Преобразуем логотип в биты
+        # преобразуем логотип в биты
         logo_bits = self.logo_to_bits()
         total_bits = self.height * self.width
         max_bits_to_embed = total_bits // 2
@@ -177,35 +177,35 @@ class DigitalWatermark:
         
         print(f"Внедряется {len(logo_bits)} бит (половина ёмкости: {max_bits_to_embed})")
         
-        # Разбиваем изображение на блоки
+        # разбиваем изображение на блоки
         blocks_h = self.height // block_size
         blocks_w = self.width // block_size
         
-        # Вычисляем дисперсию для каждого блока
+        # вычисляем дисперсию для каждого блока
         variances = np.zeros((blocks_h, blocks_w))
         for i in range(blocks_h):
             for j in range(blocks_w):
                 block = self.image[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size]
                 variances[i, j] = np.var(block)
         
-        # Нормализуем дисперсии
+        # нормализуем дисперсии
         max_variance = np.max(variances) if np.max(variances) > 0 else 1
         normalized_vars = variances / max_variance
         
-        # Распределяем биты по блокам
+        # распределяем биты по блокам
         total_capacity = max_bits_to_embed
         block_weights = normalized_vars.flatten()
         block_weights = block_weights / np.sum(block_weights)
         bits_per_block = (block_weights * total_capacity).astype(int)
         
-        # Корректируем сумму
+        # корректируем сумму
         diff = total_capacity - np.sum(bits_per_block)
         for i in range(diff):
             bits_per_block[i % len(bits_per_block)] += 1
         
         print(f"Распределено {np.sum(bits_per_block)} бит по {len(bits_per_block)} блокам")
         
-        # Внедряем биты (используем int32)
+        # внедряем биты
         stego_image = self.image.copy().astype(np.int32)
         bit_idx = 0
         
@@ -215,29 +215,29 @@ class DigitalWatermark:
                 if n_bits == 0:
                     continue
                 
-                # Получаем пиксели блока
+                # получаем пиксели блока
                 block = stego_image[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size]
                 block_flat = block.flatten()
                 
-                # Внедряем биты в LSB
+                # внедряем биты в LSB
                 for idx in range(min(n_bits, len(block_flat))):
                     if bit_idx >= len(logo_bits):
                         break
                     block_flat[idx] = (block_flat[idx] & ~1) | logo_bits[bit_idx]
                     bit_idx += 1
                 
-                # Возвращаем блок обратно
+                # возвращаем блок обратно
                 stego_image[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size] = block_flat.reshape(block.shape)
         
         print(f"Внедрено {bit_idx} бит")
         
-        # Приводим обратно к uint8
+        # приводим обратно к uint8
         stego_image = np.clip(stego_image, 0, 255).astype(np.uint8)
         
-        # Сохраняем
+        # сохраняем
         self.save_image(stego_image, output_path)
         
-        # Считаем метрики
+        # считаем метрики
         metrics = compute_metrics(self.image_path, output_path)
         metrics['method'] = 'Adaptive'
         metrics['block_size'] = block_size
@@ -249,7 +249,7 @@ class DigitalWatermark:
         """
         Извлечение ЦВЗ из LSB-стегоизображения с использованием ключа
         """
-        # Загружаем стего-изображение
+        # загружаем стего-изображение
         stego_img = np.array(Image.open(stego_path).convert('L'), dtype=np.uint8)
         height, width = stego_img.shape
         total_pixels = height * width
@@ -257,10 +257,10 @@ class DigitalWatermark:
         if total_bits_to_extract is None:
             total_bits_to_extract = total_pixels // 2
         
-        # Восстанавливаем порядок пикселей
+        # восстанавливаем порядок пикселей
         pixel_order = self.get_pixel_order(key, total_pixels)
         
-        # Извлекаем биты
+        # извлекаем биты
         extracted_bits = []
         for idx in range(total_bits_to_extract):
             pixel_idx = pixel_order[idx]
@@ -269,7 +269,7 @@ class DigitalWatermark:
             bit = stego_img[i, j] & 1
             extracted_bits.append(bit)
         
-        # Восстанавливаем логотип
+        # восстанавливаем логотип
         logo_height, logo_width = logo_size
         extracted_logo = self.bits_to_logo(extracted_bits, logo_height, logo_width)
         
@@ -286,7 +286,7 @@ class DigitalWatermark:
         if total_bits_to_extract is None:
             total_bits_to_extract = (height * width) // 2
         
-        # Разбиваем на блоки
+        # разбиваем на блоки
         blocks_h = height // block_size
         blocks_w = width // block_size
         
@@ -299,21 +299,21 @@ class DigitalWatermark:
                 block = stego_img[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size]
                 variances[i, j] = np.var(block)
         
-        # Нормализуем
+        # нормализуем
         max_variance = np.max(variances) if np.max(variances) > 0 else 1
         normalized_vars = variances / max_variance
         
-        # Распределяем биты (как при внедрении)
+        # распределяем биты (как при внедрении)
         block_weights = normalized_vars.flatten()
         block_weights = block_weights / np.sum(block_weights)
         bits_per_block = (block_weights * total_bits_to_extract).astype(int)
         
-        # Корректируем сумму
+        # корректируем сумму
         diff = total_bits_to_extract - np.sum(bits_per_block)
         for i in range(diff):
             bits_per_block[i % len(bits_per_block)] += 1
         
-        # Извлекаем биты, читая из каждого блока ровно столько, сколько в него внедрено
+        # извлекаем биты, читая из каждого блока ровно столько, сколько в него внедрено
         extracted_bits = []
         bit_idx = 0
         for i in range(blocks_h):
@@ -335,7 +335,7 @@ class DigitalWatermark:
             if len(extracted_bits) >= total_bits_to_extract:
                 break
         
-        # Восстанавливаем логотип
+        # восстанавливаем логотип
         logo_height, logo_width = logo_size
         extracted_logo = self.bits_to_logo(extracted_bits, logo_height, logo_width)
         
@@ -365,31 +365,31 @@ def compare_methods(image_path, logo_path, output_dir, key=42, block_size=16):
     print("СРАВНЕНИЕ МЕТОДОВ ВНЕДРЕНИЯ ЦВЗ")
     print("="*60)
     
-    # Создаём объект водяного знака
+    # создаём объект водяного знака
     watermark = DigitalWatermark(image_path, logo_path)
     
-    # Режим 1: LSB с ключом
+    # режим 1: LSB с ключом
     output_lsb = os.path.join(output_dir, "watermark_lsb.png")
     metrics_lsb = watermark.embed_lsb(output_lsb, key=key)
     
-    # Режим 2: Адаптивный
+    # режим 2: Адаптивный
     output_adaptive = os.path.join(output_dir, "watermark_adaptive.png")
     metrics_adaptive = watermark.embed_adaptive(output_adaptive, block_size=block_size)
     
-    # Извлечение и проверка
+    # извлечение и проверка
     print("\n" + "="*40)
     print("ИЗВЛЕЧЕНИЕ И ПРОВЕРКА ЦВЗ")
     print("="*40)
     
-    # Извлекаем из LSB
+    # извлекаем из LSB
     extracted_lsb = watermark.extract_lsb(output_lsb, (watermark.logo_height, watermark.logo_width), key=key)
     watermark.save_logo(extracted_lsb, os.path.join(output_dir, "extracted_lsb_logo.png"))
     
-    # Извлекаем из адаптивного
+    # извлекаем из адаптивного
     extracted_adaptive = watermark.extract_adaptive(output_adaptive, (watermark.logo_height, watermark.logo_width), block_size=block_size)
     watermark.save_logo(extracted_adaptive, os.path.join(output_dir, "extracted_adaptive_logo.png"))
     
-    # Вывод результатов сравнения
+    # вывод результатов сравнения
     print("\n" + "="*40)
     print("СРАВНЕНИЕ МЕТРИК")
     print("="*40)
@@ -401,48 +401,16 @@ def compare_methods(image_path, logo_path, output_dir, key=42, block_size=16):
     return metrics_lsb, metrics_adaptive
 
 
-def process_dataset_watermarking(dataset_path, logo_path, dataset_name, output_dir, max_images=30):
-    """
-    Обрабатывает набор изображений для исследовательской части
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    results = []
-    
-    pgm_files = [f for f in os.listdir(dataset_path) if f.lower().endswith('.pgm')]
-    try:
-        pgm_files.sort(key=lambda x: int(os.path.splitext(x)[0]))
-    except ValueError:
-        pgm_files.sort()
-    pgm_files = pgm_files[:max_images]
-    
-    print(f"\nОбработка набора {dataset_name}, {len(pgm_files)} изображений")
-    
-    for idx, img_file in enumerate(pgm_files):
-        img_path = os.path.join(dataset_path, img_file)
-        print(f"  {idx+1}/{len(pgm_files)}: {img_file}")
-        
-        watermark = DigitalWatermark(img_path, logo_path)
-        
-        # Адаптивный метод
-        output_path = os.path.join(output_dir, f"{os.path.splitext(img_file)[0]}_watermark.png")
-        metrics = watermark.embed_adaptive(output_path, block_size=16)
-        metrics['image'] = img_file
-        metrics['dataset'] = dataset_name
-        results.append(metrics)
-    
-    return results
-
-
 if __name__ == "__main__":
     print("="*60)
     print("ЦИФРОВЫЕ ВОДЯНЫЕ ЗНАКИ")
     print("="*60)
     
-    # Пути
-    image_path = r"C:\...\...\...\BOSSbase_1.01\1.pgm"
+    # пути
+    image_path = os.getenv("TEST_PIC")
     logo_path = os.getenv("LOGO_PATH")  # подготовить логотип
     
-    output_dir = r"C:\...\...\...\...\...\results\watermarking"
+    output_dir = os.path.join(RESULTS_PATH, WATERMARKING_PATH)
     
     if not os.path.exists(logo_path):
         print("\nЛоготип не найден! Создаю тестовый логотип...")

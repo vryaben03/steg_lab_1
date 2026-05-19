@@ -9,26 +9,21 @@ import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
 from PIL import Image
-from scipy import stats
 import matplotlib.pyplot as plt
 
 from watermarking import DigitalWatermark
-from config import RESULTS_PATH
+from config import RESULTS_PATH, DEFAULT_MAX_IMAGES, WATERMARK_BLOCK_SIZE, CONFIDENCE
+from stego_utils import confidence_interval
 
 load_dotenv()
 
-# ========== КОНФИГУРАЦИЯ ==========
+# ========== конфиг ==========
 BOSSbase_PATH = os.getenv("BOSSbase_PATH")
 MEDICAL_COMBINED_PATH = os.getenv("MEDICAL_COMBINED_PATH")
 TEXTURE_PATH = os.getenv("TEXTURE_PATH")
 
-# Путь к логотипу (создадим тестовый, если нет)
-LOGO_PATH = os.path.join(RESULTS_PATH, "test_logo.png")
-
-# Параметры
-BLOCK_SIZE = 16
-MAX_IMAGES = 100  # количество изображений из каждого набора
-CONFIDENCE = 0.95
+# путь к логотипу (создадим тестовый, если нет)
+LOGO_PATH = os.getenv("LOGO_PATH")
 
 # Доступные наборы
 DATASETS = {}
@@ -49,13 +44,13 @@ def create_test_logo():
         print(f"Логотип уже существует: {LOGO_PATH}")
         return
     
-    # Создаём логотип 128x128 (чтобы заполнить половину ёмкости 512x512 при дублировании)
+    # cоздаём логотип 128x128 (чтобы заполнить половину ёмкости 512x512 при дублировании)
     logo_size = 128
     logo = np.zeros((logo_size, logo_size), dtype=np.uint8)
-    # Рисуем простой паттерн: квадрат и круг
+    # рисуем простой паттерн: квадрат и круг
     logo[logo_size//4:3*logo_size//4, logo_size//4:3*logo_size//4] = 255
     
-    # Круг
+    # круг
     for i in range(logo_size):
         for j in range(logo_size):
             if (i - logo_size//2)**2 + (j - logo_size//2)**2 < (logo_size//3)**2:
@@ -65,15 +60,6 @@ def create_test_logo():
     print(f"Создан тестовый логотип: {LOGO_PATH} (размер {logo_size}x{logo_size})")
 
 
-def confidence_interval(data, confidence=0.95):
-    """Вычисляет доверительный интервал для среднего"""
-    n = len(data)
-    mean = np.mean(data)
-    sem = stats.sem(data)
-    margin = sem * stats.t.ppf((1 + confidence) / 2, n - 1)
-    return mean, mean - margin, mean + margin
-
-
 def process_dataset_watermarking(dataset_path, dataset_name, logo_path, output_dir):
     """
     Обрабатывает набор изображений адаптивным методом
@@ -81,13 +67,13 @@ def process_dataset_watermarking(dataset_path, dataset_name, logo_path, output_d
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Находим PGM файлы
+    # находим PGM файлы
     pgm_files = [f for f in os.listdir(dataset_path) if f.lower().endswith('.pgm')]
     try:
         pgm_files.sort(key=lambda x: int(os.path.splitext(x)[0]))
     except ValueError:
         pgm_files.sort()
-    pgm_files = pgm_files[:MAX_IMAGES]
+    pgm_files = pgm_files[:DEFAULT_MAX_IMAGES]
     
     print(f"\nОбработка набора {dataset_name} ({len(pgm_files)} изображений)...")
     
@@ -98,14 +84,14 @@ def process_dataset_watermarking(dataset_path, dataset_name, logo_path, output_d
         img_path = os.path.join(dataset_path, img_file)
         
         try:
-            # Создаём объект водяного знака
+            # создаём объект водяного знака
             watermark = DigitalWatermark(img_path, logo_path)
             
-            # Выходной путь
+            # выходной путь
             output_path = os.path.join(output_dir, f"{os.path.splitext(img_file)[0]}_watermark.png")
             
-            # Адаптивное внедрение
-            metrics = watermark.embed_adaptive(output_path, block_size=BLOCK_SIZE)
+            # адаптивное внедрение
+            metrics = watermark.embed_adaptive(output_path, block_size=WATERMARK_BLOCK_SIZE)
             
             psnr_values.append(metrics['PSNR'])
             results.append({
@@ -127,7 +113,7 @@ def process_dataset_watermarking(dataset_path, dataset_name, logo_path, output_d
 
 def main():
     print("="*60)
-    print("ЗАДАНИЕ 2 - ИССЛЕДОВАТЕЛЬСКАЯ ЧАСТЬ")
+    print("ИССЛЕДОВАТЕЛЬСКАЯ ЧАСТЬ")
     print("Адаптивное внедрение ЦВЗ по локальной дисперсии")
     print("Доверительные интервалы для PSNR (95%)")
     print("="*60)
@@ -136,14 +122,14 @@ def main():
         print("Нет доступных наборов изображений!")
         return
     
-    # Создаём логотип
+    # создаём логотип
     create_test_logo()
     
-    # Папка для результатов
+    # папка для результатов
     watermark_results_dir = os.path.join(RESULTS_PATH, "watermarking_adaptive")
     os.makedirs(watermark_results_dir, exist_ok=True)
     
-    # Собираем результаты по наборам
+    # собираем результаты по наборам
     all_psnr = {}
     all_results = []
     
@@ -160,11 +146,11 @@ def main():
         all_psnr[dataset_name] = psnr_values
         all_results.extend(results)
         
-        # Сохраняем результаты в CSV
+        # сохраняем результаты в CSV
         df = pd.DataFrame(results)
         df.to_csv(os.path.join(watermark_results_dir, f"{dataset_name}_psnr.csv"), index=False)
     
-    # Считаем доверительные интервалы
+    # считаем доверительные интервалы
     print("\n" + "="*60)
     print("ДОВЕРИТЕЛЬНЫЕ ИНТЕРВАЛЫ ДЛЯ PSNR (95%)")
     print("="*60)
@@ -185,11 +171,11 @@ def main():
         print(f"  95% доверительный интервал = [{ci_lower:.2f}, {ci_upper:.2f}]")
         print(f"  Стандартное отклонение = {np.std(psnr_values):.2f}")
     
-    # Сохраняем сводку
+    # сохраняем сводку
     summary_df = pd.DataFrame(confidence_data)
     summary_df.to_csv(os.path.join(watermark_results_dir, "confidence_intervals.csv"), index=False)
     
-    # Строим график
+    # строим график
     plot_confidence_intervals(confidence_data, watermark_results_dir)
     
     print("\n" + "="*60)
@@ -214,7 +200,7 @@ def plot_confidence_intervals(confidence_data, output_dir):
     plt.title('Доверительные интервалы для PSNR (95%)\nАдаптивное внедрение ЦВЗ по локальной дисперсии', fontsize=14)
     plt.grid(True, alpha=0.3, axis='y')
     
-    # Добавляем значения на столбцы
+    # добавляем значения на столбцы
     for bar, mean, err_low, err_up in zip(bars, means, errors_lower, errors_upper):
         plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 f'{mean:.1f}', ha='center', va='bottom', fontsize=10)
